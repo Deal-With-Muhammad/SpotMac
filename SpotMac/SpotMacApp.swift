@@ -1,17 +1,10 @@
-//
-//  SpotMacApp.swift
-//  SpotMac
-//
-//  Created by Muhammad Ahmad on 25/04/2026.
-//
-
 import SwiftUI
 
 @main
 struct SpotMacApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
+        Settings { EmptyView() }
     }
 }
