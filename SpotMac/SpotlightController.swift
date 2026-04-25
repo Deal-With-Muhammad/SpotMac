@@ -1,15 +1,30 @@
 import AppKit
 
 final class SpotlightController {
-    private let settleDelay: TimeInterval = 0.5
+    private let settings: SpotSettings
+    private let fadeDuration: TimeInterval = 0.12
 
     private var window: NSWindow?
     private var view: SpotlightView?
     private var monitors: [Any] = []
     private var settleTimer: Timer?
+    private var isDismissing = false
+
+    init(settings: SpotSettings = .shared) {
+        self.settings = settings
+    }
+
+    var isVisible: Bool { window != nil && !isDismissing }
 
     func show() {
-        guard window == nil, let screen = NSScreen.main else { return }
+        if isVisible { return }
+        if isDismissing {
+            // A previous fade-out is still in flight — finish it instantly so the
+            // new show() doesn't fight the animation.
+            forceTeardown()
+        }
+
+        guard let screen = NSScreen.main else { return }
         let frame = screen.frame
 
         let win = NSWindow(
@@ -28,9 +43,21 @@ final class SpotlightController {
         win.isReleasedWhenClosed = false
 
         let spotlight = SpotlightView(frame: NSRect(origin: .zero, size: frame.size))
+        applySettings(to: spotlight)
         spotlight.cursorPoint = localCursorPoint(in: frame)
         win.contentView = spotlight
-        win.orderFrontRegardless()
+
+        if settings.animateFade {
+            win.alphaValue = 0
+            win.orderFrontRegardless()
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = fadeDuration
+                win.animator().alphaValue = 1
+            }
+        } else {
+            win.alphaValue = 1
+            win.orderFrontRegardless()
+        }
 
         self.window = win
         self.view = spotlight
@@ -39,12 +66,36 @@ final class SpotlightController {
     }
 
     func hide() {
+        guard window != nil, !isDismissing else { return }
+        isDismissing = true
         removeMonitors()
         settleTimer?.invalidate()
         settleTimer = nil
+
+        if settings.animateFade, let win = window {
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = fadeDuration
+                win.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
+                self?.forceTeardown()
+            })
+        } else {
+            forceTeardown()
+        }
+    }
+
+    private func forceTeardown() {
         window?.orderOut(nil)
         window = nil
         view = nil
+        isDismissing = false
+    }
+
+    private func applySettings(to view: SpotlightView) {
+        view.holeRadius = CGFloat(settings.spotlightRadius)
+        view.dimAlpha = CGFloat(settings.dimLevel)
+        view.softEdge = settings.softEdge
+        view.showRing = settings.showRing
     }
 
     private func localCursorPoint(in windowFrame: NSRect) -> NSPoint {
@@ -92,8 +143,10 @@ final class SpotlightController {
         guard let view = view, let window = window else { return }
         view.cursorPoint = localCursorPoint(in: window.frame)
 
+        guard settings.settleEnabled else { return }
         settleTimer?.invalidate()
-        settleTimer = Timer.scheduledTimer(withTimeInterval: settleDelay, repeats: false) { [weak self] _ in
+        let delay = max(0.05, settings.settleDelayMs / 1000.0)
+        settleTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             self?.hide()
         }
     }
